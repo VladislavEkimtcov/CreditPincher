@@ -4,8 +4,8 @@
     <name>CreditPincher</name>
     <vendor>vladislavekimtcov</vendor>
     <description><![CDATA[
-        <p><b>CreditPincher</b> is a repository that provides a pure template to make it easier to create a new plugin project.</p>
-        <p>The main goal of this template is to speed up the setup phase of plugin development for both new and experienced developers by preconfiguring the project scaffold and CI, linking to the proper documentation pages, and keeping everything organized.</p>
+        <p><b>CreditPincher</b> helps you track AI inference credit usage directly inside JetBrains IDEs.</p>
+        <p>Log usage locally, set a self-imposed monthly budget, explore a date range with calendar controls, and review month-focused pacing statistics without sending your data anywhere.</p>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -13,7 +13,11 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.vladislavekimtcov.creditpincher.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
+        <toolWindow id="AIUse"
+                    stripeTitle="AI Use"
+                    anchor="right"
+                    icon="/icons/aiUseToolWindow.svg"
+                    factoryClass="com.github.vladislavekimtcov.creditpincher.toolWindow.MyToolWindowFactory"/>
         <postStartupActivity implementation="com.github.vladislavekimtcov.creditpincher.startup.MyProjectActivity" />
     </extensions>
 </idea-plugin>

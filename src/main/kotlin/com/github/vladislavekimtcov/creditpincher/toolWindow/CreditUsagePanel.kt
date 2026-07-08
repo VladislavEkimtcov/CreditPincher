@@ -38,6 +38,9 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
     private val numberFormat = DecimalFormat("#,##0.00")
     private val dateTimeFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
+    private val toggleUnitButton = JButton()
+    private var showInDollars = false
+
     private val amountField = JBTextField()
     private val budgetField = JBTextField()
     private val startDatePicker = createDatePicker(LocalDate.now().withDayOfMonth(1))
@@ -61,6 +64,13 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
 
     init {
         border = JBUI.Borders.empty(8)
+
+        toggleUnitButton.addActionListener {
+            showInDollars = !showInDollars
+            updateToggleButtonText()
+            refreshStats()
+        }
+        updateToggleButtonText()
 
         recentEntriesArea.isEditable = false
         recentEntriesArea.lineWrap = false
@@ -145,6 +155,7 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
 
     private fun createStatsSection(): JComponent {
         val section = createSectionPanel(MyBundle["section.stats"])
+        section.addHeaderControl(toggleUnitButton)
         section.addRow(MyBundle["stat.range"], rangeValue)
         section.addRow(MyBundle["stat.totalCredits"], totalCreditsValue)
         section.addRow(MyBundle["stat.entryCount"], entryCountValue)
@@ -290,8 +301,24 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
     private fun toDate(localDate: LocalDate): Date =
         Date.from(localDate.atStartOfDay(zoneId).toInstant())
 
-    private fun formatCredits(value: Double?): String =
-        value?.let { MyBundle["value.credits", numberFormat.format(it)] } ?: MyBundle["value.notAvailable"]
+    private fun updateToggleButtonText() {
+        toggleUnitButton.text = if (showInDollars) {
+            MyBundle["button.showInCredits"]
+        } else {
+            MyBundle["button.showInDollars"]
+        }
+    }
+
+    private fun formatCredits(value: Double?): String {
+        if (value == null) return MyBundle["value.notAvailable"]
+        return if (showInDollars) {
+            val prefix = if (value < 0.0) "-" else ""
+            val absVal = kotlin.math.abs(value)
+            prefix + "$" + numberFormat.format(absVal / 100.0)
+        } else {
+            MyBundle["value.credits", numberFormat.format(value)]
+        }
+    }
 
     private fun formatPercent(value: Double?): String =
         value?.let { MyBundle["value.percent", numberFormat.format(it)] } ?: MyBundle["value.notAvailable"]
@@ -334,6 +361,15 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
             }
 
             addFullWidth(buttonPanel)
+        }
+
+        fun addHeaderControl(component: JComponent) {
+            val headerPanel = JPanel(BorderLayout()).apply {
+                isOpaque = false
+                add(component, BorderLayout.EAST)
+            }
+
+            addFullWidth(headerPanel)
         }
 
         fun addFullWidth(component: JComponent) {

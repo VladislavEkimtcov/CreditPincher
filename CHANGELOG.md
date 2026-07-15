@@ -3,5 +3,10 @@
 # CreditPincher Changelog
 
 ## [Unreleased]
-### Added
-- Initial scaffold created from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
+
+## [1.0.2] - 2026-07-15
+
+build please
+
+[Unreleased]: https://github.com/VladislavEkimtcov/CreditPincher/compare/1.0.2...HEAD
+[1.0.2]: https://github.com/VladislavEkimtcov/CreditPincher/commits/1.0.2

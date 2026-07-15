@@ -302,6 +302,7 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
                 val dateTime = dateTimeFormat.format(entry.timestamp.atZone(zoneId))
                 "$dateTime  •  ${formatCredits(entry.amount)}"
             }
+        recentEntriesArea.caretPosition = 0
     }
 
     private fun formatRunway(stats: UsageStats): String {

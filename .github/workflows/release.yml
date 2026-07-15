@@ -11,7 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
 
       # Free GitHub Actions Environment Disk Space
@@ -38,17 +37,6 @@ jobs:
         with:
           cache-read-only: true
 
-      # Update the Unreleased section with the current release note
-      - name: Patch Changelog
-        env:
-          CHANGELOG: ${{ github.event.head_commit.message || 'Automated build update.' }}
-        run: |
-          RELEASE_NOTE="./build/tmp/release_note.txt"
-          mkdir -p "$(dirname "$RELEASE_NOTE")"
-          echo "$CHANGELOG" > $RELEASE_NOTE
-
-          ./gradlew patchChangelog --release-note-file=$RELEASE_NOTE
-
       # Build the local plugin distribution zip package
       - name: Build Plugin
         run: ./gradlew buildPlugin
@@ -61,30 +49,3 @@ jobs:
           gh release create v1.0.${{ github.run_number }} ./build/distributions/* \
             --title "Release v1.0.${{ github.run_number }}" \
             --notes "${{ github.event.head_commit.message || 'Automated release.' }}"
-
-      # Create a pull request to sync the patched changelog back to the repository
-      - name: Create Pull Request
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="v1.0.${{ github.run_number }}"
-          BRANCH="changelog-update-$VERSION"
-          LABEL="release changelog"
-
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-
-          git checkout -b $BRANCH
-          git commit -am "Changelog update - $VERSION"
-          git push --set-upstream origin $BRANCH
-
-          gh label create "$LABEL" \
-            --description "Pull requests with release changelog update" \
-            --force \
-            || true
-
-          gh pr create \
-            --title "Changelog update - \`$VERSION\`" \
-            --body "Current pull request contains patched \`CHANGELOG.md\` file for the \`$VERSION\` version." \
-            --label "$LABEL" \
-            --head $BRANCH

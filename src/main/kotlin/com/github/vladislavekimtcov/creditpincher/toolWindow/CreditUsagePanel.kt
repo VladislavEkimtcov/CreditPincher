@@ -24,6 +24,7 @@ import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Date
 import javax.swing.Box
 import javax.swing.BoxLayout
@@ -61,6 +62,7 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
     private val runwayValue = JBLabel()
     private val lastEntryValue = JBLabel()
     private val recentEntriesArea = JBTextArea()
+    private val usageBarChart = UsageBarChart()
 
     init {
         border = JBUI.Borders.empty(8)
@@ -86,6 +88,8 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         content.add(createBudgetSection())
         content.add(Box.createVerticalStrut(JBUI.scale(8)))
         content.add(createStatsSection())
+        content.add(Box.createVerticalStrut(JBUI.scale(8)))
+        content.add(createBarChartSection())
         content.add(Box.createVerticalStrut(JBUI.scale(8)))
         content.add(createStorageSection())
         content.add(Box.createVerticalStrut(JBUI.scale(8)))
@@ -182,6 +186,12 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         return section
     }
 
+    private fun createBarChartSection(): JComponent {
+        val section = createSectionPanel(MyBundle["section.barChart"])
+        section.addFullWidth(usageBarChart)
+        return section
+    }
+
     private fun createRecentEntriesSection(): JComponent {
         val section = createSectionPanel(MyBundle["section.recentEntries"])
         section.addFullWidth(JBScrollPane(recentEntriesArea).apply {
@@ -262,6 +272,24 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
             ?: MyBundle["value.singleMonthOnly"]
         runwayValue.text = formatRunway(stats)
         lastEntryValue.text = stats.latestEntryDate?.toString() ?: MyBundle["value.notAvailable"]
+
+        // Aggregate daily usages for the bar chart
+        val normalizedStart = minOf(startDate, endDate)
+        val normalizedEnd = maxOf(startDate, endDate)
+        val daysCount = ChronoUnit.DAYS.between(normalizedStart, normalizedEnd) + 1
+        val filteredEntries = entries.filter { entry ->
+            val entryDate = entry.localDate(zoneId)
+            !entryDate.isBefore(normalizedStart) && !entryDate.isAfter(normalizedEnd)
+        }
+        val creditsByDay = filteredEntries
+            .groupBy { it.localDate(zoneId) }
+            .mapValues { (_, dayEntries) -> dayEntries.sumOf(CreditUsageEntry::amount) }
+        val dailyUsages = (0 until daysCount).map { i ->
+            val date = normalizedStart.plusDays(i)
+            UsageBarChart.DailyUsage(date, creditsByDay[date] ?: 0.0)
+        }
+        usageBarChart.updateData(dailyUsages, showInDollars)
+
         updateRecentEntries(entries)
         statusLabel.text = statusMessage ?: MyBundle["status.summary", stats.entryCount, stats.daysInRange]
     }

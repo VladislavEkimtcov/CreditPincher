@@ -1,6 +1,7 @@
 package com.github.vladislavekimtcov.creditpincher
 
 import com.github.vladislavekimtcov.creditpincher.model.CreditUsageEntry
+import com.github.vladislavekimtcov.creditpincher.toolWindow.UsageBarChart
 import com.github.vladislavekimtcov.creditpincher.services.CreditStatsCalculator
 import com.github.vladislavekimtcov.creditpincher.services.CreditUsageStorage
 import org.junit.Assert.assertEquals
@@ -90,6 +91,21 @@ class MyPluginTest {
         } finally {
             tempDirectory.toFile().deleteRecursively()
         }
+    }
+
+    @Test
+    fun testUsageBarChartDataUpdate() {
+        val chart = UsageBarChart()
+        val data = listOf(
+            UsageBarChart.DailyUsage(LocalDate.of(2026, 7, 1), 10.0),
+            UsageBarChart.DailyUsage(LocalDate.of(2026, 7, 2), 20.0)
+        )
+        chart.updateData(data, showDollars = false)
+        chart.setSize(400, 200)
+        val image = java.awt.image.BufferedImage(400, 200, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+        val g = image.createGraphics()
+        chart.paint(g)
+        g.dispose()
     }
 
     private fun entry(timestamp: String, amount: Double): CreditUsageEntry =

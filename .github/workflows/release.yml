@@ -1,7 +1,4 @@
 # GitHub Actions Workflow created for handling the release process automatically on every build.
-# Running the publishPlugin task requires all the following secrets to be provided: PUBLISH_TOKEN, PRIVATE_KEY, PRIVATE_KEY_PASSWORD, CERTIFICATE_CHAIN.
-# See https://plugins.jetbrains.com/docs/intellij/plugin-signing.html for more information.
-
 name: Release
 on:
   push:
@@ -9,10 +6,8 @@ on:
       - main
 
 jobs:
-
-  # Prepare and publish the plugin to JetBrains Marketplace repository
   release:
-    name: Publish Plugin
+    name: Build and Release Plugin
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -54,16 +49,11 @@ jobs:
 
           ./gradlew patchChangelog --release-note-file=$RELEASE_NOTE
 
-      # Publish the plugin to JetBrains Marketplace
-      - name: Publish Plugin
-        env:
-          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
-          CERTIFICATE_CHAIN: ${{ secrets.CERTIFICATE_CHAIN }}
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
-        run: ./gradlew publishPlugin
+      # Build the local plugin distribution zip package
+      - name: Build Plugin
+        run: ./gradlew buildPlugin
 
-      # Create a new GitHub Release and upload the artifact
+      # Create a new GitHub Release and upload the built zip artifact
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -72,7 +62,7 @@ jobs:
             --title "Release v1.0.${{ github.run_number }}" \
             --notes "${{ github.event.head_commit.message || 'Automated release.' }}"
 
-      # Create a pull request
+      # Create a pull request to sync the patched changelog back to the repository
       - name: Create Pull Request
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

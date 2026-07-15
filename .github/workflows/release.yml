@@ -1,11 +1,12 @@
-# GitHub Actions Workflow created for handling the release process based on the draft release prepared with the Build workflow.
+# GitHub Actions Workflow created for handling the release process automatically on every build.
 # Running the publishPlugin task requires all the following secrets to be provided: PUBLISH_TOKEN, PRIVATE_KEY, PRIVATE_KEY_PASSWORD, CERTIFICATE_CHAIN.
 # See https://plugins.jetbrains.com/docs/intellij/plugin-signing.html for more information.
 
 name: Release
 on:
-  release:
-    types: [ prereleased, released ]
+  push:
+    branches:
+      - main
 
 jobs:
 
@@ -28,8 +29,6 @@ jobs:
       # Check out the current repository
       - name: Fetch Sources
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.release.tag_name }}
 
       # Set up the Java environment for the next steps
       - name: Setup Java
@@ -46,9 +45,8 @@ jobs:
 
       # Update the Unreleased section with the current release note
       - name: Patch Changelog
-        if: ${{ github.event.release.body != '' }}
         env:
-          CHANGELOG: ${{ github.event.release.body }}
+          CHANGELOG: ${{ github.event.head_commit.message || 'Automated build update.' }}
         run: |
           RELEASE_NOTE="./build/tmp/release_note.txt"
           mkdir -p "$(dirname "$RELEASE_NOTE")"
@@ -65,19 +63,21 @@ jobs:
           PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
         run: ./gradlew publishPlugin
 
-      # Upload an artifact as a release asset
-      - name: Upload Release Asset
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.event.release.tag_name }} ./build/distributions/*
-
-      # Create a pull request
-      - name: Create Pull Request
-        if: ${{ github.event.release.body != '' }}
+      # Create a new GitHub Release and upload the artifact
+      - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ github.event.release.tag_name }}"
+          gh release create v1.0.${{ github.run_number }} ./build/distributions/* \
+            --title "Release v1.0.${{ github.run_number }}" \
+            --notes "${{ github.event.head_commit.message || 'Automated release.' }}"
+
+      # Create a pull request
+      - name: Create Pull Request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="v1.0.${{ github.run_number }}"
           BRANCH="changelog-update-$VERSION"
           LABEL="release changelog"
 

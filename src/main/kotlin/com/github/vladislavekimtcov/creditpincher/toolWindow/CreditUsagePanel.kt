@@ -118,10 +118,7 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         val section = createSectionPanel(MyBundle["section.dateRange"])
         val currentMonthButton = JButton(MyBundle["button.currentMonth"]).apply {
             addActionListener {
-                val today = LocalDate.now()
-                startDatePicker.date = toDate(today.withDayOfMonth(1))
-                endDatePicker.date = toDate(today)
-                refreshStats(MyBundle["status.dateRangeReset"])
+                resetToCurrentMonth()
             }
         }
 
@@ -287,12 +284,24 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         val projectionMonth = stats.projectionMonth ?: return MyBundle["value.singleMonthOnly"]
         val runOutDay = stats.projectedBudgetRunOutDay
         if (runOutDay != null) {
-            return MyBundle["value.runOutDay", projectionMonth.atDay(runOutDay)]
+            val runOutDate = projectionMonth.atDay(runOutDay)
+            if (runOutDate.isBefore(LocalDate.now(zoneId))) {
+                val overBudgetAmount = stats.projectedMonthRemaining?.let { kotlin.math.abs(it) }
+                return MyBundle["value.overBudget", formatCredits(overBudgetAmount)]
+            }
+            return MyBundle["value.runOutDay", runOutDate]
         }
 
         return stats.projectedMonthRemaining
             ?.let { MyBundle["value.underBudget", formatCredits(it)] }
             ?: MyBundle["value.notAvailable"]
+    }
+
+    fun resetToCurrentMonth() {
+        val today = LocalDate.now()
+        startDatePicker.date = toDate(today.withDayOfMonth(1))
+        endDatePicker.date = toDate(today)
+        refreshStats(MyBundle["status.dateRangeReset"])
     }
 
     private fun selectedDate(datePicker: JXDatePicker): LocalDate =

@@ -15,3 +15,6 @@ dependencies {
         testFramework(TestFrameworkType.Platform)
     }
 }
+
+val buildNumber = System.getenv("GITHUB_RUN_NUMBER") ?: "LOCAL"
+version = "1.0.$buildNumber"

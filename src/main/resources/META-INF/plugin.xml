@@ -20,4 +20,9 @@
                     factoryClass="com.github.vladislavekimtcov.creditpincher.toolWindow.MyToolWindowFactory"/>
         <postStartupActivity implementation="com.github.vladislavekimtcov.creditpincher.startup.MyProjectActivity" />
     </extensions>
+
+    <projectListeners>
+        <listener class="com.github.vladislavekimtcov.creditpincher.toolWindow.MyToolWindowListener"
+                  topic="com.intellij.openapi.wm.ex.ToolWindowManagerListener"/>
+    </projectListeners>
 </idea-plugin>

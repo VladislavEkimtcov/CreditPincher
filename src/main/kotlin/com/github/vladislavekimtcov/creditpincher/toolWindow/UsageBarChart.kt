@@ -98,8 +98,8 @@ class UsageBarChart : JComponent() {
         return "<html><b>$dateStr</b><br/>Usage: $creditsStr<br/>Cost: $dollarsStr</html>"
     }
 
-    override fun getPreferredSize(): Dimension = Dimension(super.getPreferredSize().width, JBUI.scale(180))
-    override fun getMinimumSize(): Dimension = Dimension(super.getMinimumSize().width, JBUI.scale(120))
+    override fun getPreferredSize(): Dimension = Dimension(JBUI.scale(150), JBUI.scale(180))
+    override fun getMinimumSize(): Dimension = Dimension(JBUI.scale(100), JBUI.scale(120))
 
     override fun paintComponent(g: Graphics) {
         super.paintComponent(g)

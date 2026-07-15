@@ -16,9 +16,12 @@ import com.intellij.util.ui.JBUI
 import org.jdesktop.swingx.JXDatePicker
 import java.awt.BorderLayout
 import java.awt.Component
+import java.awt.Dimension
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
+import java.awt.Rectangle
+import javax.swing.Scrollable
 import java.text.DecimalFormat
 import java.text.SimpleDateFormat
 import java.time.LocalDate
@@ -46,21 +49,21 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
     private val budgetField = JBTextField()
     private val startDatePicker = createDatePicker(LocalDate.now().withDayOfMonth(1))
     private val endDatePicker = createDatePicker(LocalDate.now())
-    private val statusLabel = JBLabel(" ")
-    private val totalCreditsValue = JBLabel()
-    private val rangeValue = JBLabel()
-    private val entryCountValue = JBLabel()
-    private val activeDaysValue = JBLabel()
-    private val averagePerDayValue = JBLabel()
-    private val averagePerActiveDayValue = JBLabel()
-    private val busiestDayValue = JBLabel()
-    private val highestEntryValue = JBLabel()
-    private val budgetValue = JBLabel()
-    private val rangeBudgetValue = JBLabel()
-    private val remainingBudgetValue = JBLabel()
-    private val projectedMonthValue = JBLabel()
-    private val runwayValue = JBLabel()
-    private val lastEntryValue = JBLabel()
+    private val statusLabel = WrappingLabel(" ")
+    private val totalCreditsValue = WrappingLabel()
+    private val rangeValue = WrappingLabel()
+    private val entryCountValue = WrappingLabel()
+    private val activeDaysValue = WrappingLabel()
+    private val averagePerDayValue = WrappingLabel()
+    private val averagePerActiveDayValue = WrappingLabel()
+    private val busiestDayValue = WrappingLabel()
+    private val highestEntryValue = WrappingLabel()
+    private val budgetValue = WrappingLabel()
+    private val rangeBudgetValue = WrappingLabel()
+    private val remainingBudgetValue = WrappingLabel()
+    private val projectedMonthValue = WrappingLabel()
+    private val runwayValue = WrappingLabel()
+    private val lastEntryValue = WrappingLabel()
     private val recentEntriesArea = JBTextArea()
     private val usageBarChart = UsageBarChart()
 
@@ -75,12 +78,12 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         updateToggleButtonText()
 
         recentEntriesArea.isEditable = false
-        recentEntriesArea.lineWrap = false
+        recentEntriesArea.lineWrap = true
+        recentEntriesArea.wrapStyleWord = true
         recentEntriesArea.rows = 8
         recentEntriesArea.emptyText.text = MyBundle["recentEntries.empty"]
 
-        val content = JBPanel<JBPanel<*>>()
-        content.layout = BoxLayout(content, BoxLayout.Y_AXIS)
+        val content = ScrollablePanel()
         content.add(createUsageEntrySection())
         content.add(Box.createVerticalStrut(JBUI.scale(8)))
         content.add(createDateRangeSection())
@@ -114,7 +117,7 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
 
         section.addRow(MyBundle["label.amount"], amountField)
         section.addFullWidth(submitButton)
-        section.addFullWidth(JBLabel(MyBundle["hint.usageEntry"]))
+        section.addFullWidth(WrappingLabel(MyBundle["hint.usageEntry"]))
         return section
     }
 
@@ -129,7 +132,7 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         section.addRow(MyBundle["label.startDate"], startDatePicker)
         section.addRow(MyBundle["label.endDate"], endDatePicker)
         section.addFullWidth(currentMonthButton)
-        section.addFullWidth(JBLabel(MyBundle["hint.dateRange"]))
+        section.addFullWidth(WrappingLabel(MyBundle["hint.dateRange"]))
         return section
     }
 
@@ -150,7 +153,7 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
 
         section.addRow(MyBundle["label.monthlyBudget"], budgetField)
         section.addInlineButtons(saveButton, clearButton)
-        section.addFullWidth(JBLabel(MyBundle["hint.budget"]))
+        section.addFullWidth(WrappingLabel(MyBundle["hint.budget"]))
         return section
     }
 
@@ -179,10 +182,11 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         val pathField = JBTextField(store.storageDirectory().toString()).apply {
             isEditable = false
             toolTipText = text
+            minimumSize = Dimension(JBUI.scale(50), minimumSize.height)
         }
 
         section.addRow(MyBundle["label.storageDirectory"], pathField)
-        section.addFullWidth(JBLabel(MyBundle["hint.storage"]))
+        section.addFullWidth(WrappingLabel(MyBundle["hint.storage"]))
         return section
     }
 
@@ -425,5 +429,41 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
             anchor = GridBagConstraints.NORTHWEST
             insets = Insets(JBUI.scale(4), JBUI.scale(4), JBUI.scale(4), JBUI.scale(4))
         }
+    }
+
+    private class ScrollablePanel : JPanel(), Scrollable {
+        init {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        }
+        override fun getPreferredScrollableViewportSize(): Dimension = preferredSize
+        override fun getScrollableUnitIncrement(visibleRect: Rectangle?, orientation: Int, direction: Int): Int = 16
+        override fun getScrollableBlockIncrement(visibleRect: Rectangle?, orientation: Int, direction: Int): Int = 32
+        override fun getScrollableTracksViewportWidth(): Boolean = true
+        override fun getScrollableTracksViewportHeight(): Boolean = false
+    }
+
+    private class WrappingLabel(text: String = "") : JBTextArea(text) {
+        init {
+            lineWrap = true
+            wrapStyleWord = true
+            isEditable = false
+            isFocusable = false
+            isOpaque = false
+            border = null
+            font = JBUI.Fonts.label()
+        }
+        override fun getPreferredSize(): Dimension {
+            val parentWidth = parent?.width ?: 100
+            val insets = parent?.insets
+            val padding = (insets?.left ?: 0) + (insets?.right ?: 0) + 10
+            val width = maxOf(50, parentWidth - padding)
+            
+            val oldSize = size
+            setSize(width, 10000)
+            val prefHeight = getUI().getPreferredSize(this).height
+            size = oldSize
+            return Dimension(10, prefHeight)
+        }
+        override fun getMinimumSize(): Dimension = Dimension(10, preferredSize.height)
     }
 }

@@ -5,6 +5,7 @@ import com.github.vladislavekimtcov.creditpincher.model.CreditUsageEntry
 import com.github.vladislavekimtcov.creditpincher.model.UsageStats
 import com.github.vladislavekimtcov.creditpincher.services.CreditStatsCalculator
 import com.github.vladislavekimtcov.creditpincher.services.CreditUsageStore
+import com.github.vladislavekimtcov.creditpincher.services.GitBackupService
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.components.JBLabel
@@ -66,6 +67,14 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
     private val lastEntryValue = WrappingLabel()
     private val recentEntriesArea = JBTextArea()
     private val usageBarChart = UsageBarChart()
+
+    private val gitService by lazy { GitBackupService(store.storageDirectory()) }
+    private val remoteUrlField = JBTextField()
+    private val connectGitButton = JButton()
+    private val commitPushButton = JButton()
+    private val gitStatusLabel = WrappingLabel(" ")
+    private val gitConnectPanel = JPanel()
+    private val gitBackupPanel = JPanel()
 
     init {
         border = JBUI.Borders.empty(8)
@@ -187,7 +196,125 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
 
         section.addRow(MyBundle["label.storageDirectory"], pathField)
         section.addFullWidth(WrappingLabel(MyBundle["hint.storage"]))
+        section.addFullWidth(createGitPanel())
         return section
+    }
+
+    private fun createGitPanel(): JComponent {
+        remoteUrlField.emptyText.text = MyBundle["placeholder.gitRemoteUrl"]
+
+        connectGitButton.text = MyBundle["button.connectGit"]
+        connectGitButton.addActionListener { connectGitRepository() }
+
+        commitPushButton.text = MyBundle["button.commitPushGit"]
+        commitPushButton.addActionListener { commitAndPushGit() }
+
+        val urlRow = JPanel(BorderLayout(JBUI.scale(8), 0)).apply {
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(JBLabel(MyBundle["label.gitRemoteUrl"]), BorderLayout.WEST)
+            add(remoteUrlField, BorderLayout.CENTER)
+        }
+
+        gitConnectPanel.layout = BoxLayout(gitConnectPanel, BoxLayout.Y_AXIS)
+        gitConnectPanel.isOpaque = false
+        gitConnectPanel.alignmentX = Component.LEFT_ALIGNMENT
+        gitConnectPanel.add(urlRow)
+        gitConnectPanel.add(Box.createVerticalStrut(JBUI.scale(4)))
+        gitConnectPanel.add(connectGitButton.apply { alignmentX = Component.LEFT_ALIGNMENT })
+        gitConnectPanel.add(Box.createVerticalStrut(JBUI.scale(4)))
+        gitConnectPanel.add(WrappingLabel(MyBundle["hint.gitConnect"]).apply { alignmentX = Component.LEFT_ALIGNMENT })
+
+        gitBackupPanel.layout = BoxLayout(gitBackupPanel, BoxLayout.Y_AXIS)
+        gitBackupPanel.isOpaque = false
+        gitBackupPanel.alignmentX = Component.LEFT_ALIGNMENT
+        gitBackupPanel.add(commitPushButton.apply { alignmentX = Component.LEFT_ALIGNMENT })
+        gitBackupPanel.add(Box.createVerticalStrut(JBUI.scale(4)))
+        gitBackupPanel.add(WrappingLabel(MyBundle["hint.gitBackup"]).apply { alignmentX = Component.LEFT_ALIGNMENT })
+
+        val container = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(TitledBorder(MyBundle["section.gitBackup"]).let { titled ->
+                JPanel(BorderLayout()).apply {
+                    isOpaque = false
+                    border = titled
+                    alignmentX = Component.LEFT_ALIGNMENT
+                    add(JPanel().apply {
+                        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                        isOpaque = false
+                        add(gitStatusLabel.apply { alignmentX = Component.LEFT_ALIGNMENT })
+                        add(Box.createVerticalStrut(JBUI.scale(4)))
+                        add(gitConnectPanel)
+                        add(gitBackupPanel)
+                    }, BorderLayout.CENTER)
+                }
+            })
+        }
+
+        refreshGitState()
+        return container
+    }
+
+    private fun refreshGitState() {
+        connectGitButton.isEnabled = false
+        commitPushButton.isEnabled = false
+        gitStatusLabel.text = MyBundle["status.gitChecking"]
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val isRepo = gitService.isGitRepository()
+            ApplicationManager.getApplication().invokeLater {
+                gitConnectPanel.isVisible = !isRepo
+                gitBackupPanel.isVisible = isRepo
+                gitStatusLabel.text = if (isRepo) MyBundle["status.gitConnected"] else MyBundle["status.gitNotConnected"]
+                connectGitButton.isEnabled = true
+                commitPushButton.isEnabled = true
+                revalidate()
+                repaint()
+            }
+        }
+    }
+
+    private fun connectGitRepository() {
+        val url = remoteUrlField.text.trim()
+        if (url.isEmpty()) {
+            gitStatusLabel.text = MyBundle["status.gitInvalidUrl"]
+            return
+        }
+
+        connectGitButton.isEnabled = false
+        gitStatusLabel.text = MyBundle["status.gitConnecting"]
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val result = gitService.connectToRemote(url)
+            ApplicationManager.getApplication().invokeLater {
+                gitStatusLabel.text = if (result.success) {
+                    MyBundle["status.gitConnectSuccess"]
+                } else {
+                    MyBundle["status.gitConnectFailure", result.output]
+                }
+                connectGitButton.isEnabled = true
+                refreshGitState()
+            }
+        }
+    }
+
+    private fun commitAndPushGit() {
+        commitPushButton.isEnabled = false
+        gitStatusLabel.text = MyBundle["status.gitPushing"]
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val result = gitService.commitAndPush()
+            ApplicationManager.getApplication().invokeLater {
+                gitStatusLabel.text = if (result.success) {
+                    MyBundle["status.gitPushSuccess"]
+                } else {
+                    MyBundle["status.gitPushFailure", result.output]
+                }
+                commitPushButton.isEnabled = true
+            }
+        }
     }
 
     private fun createBarChartSection(): JComponent {

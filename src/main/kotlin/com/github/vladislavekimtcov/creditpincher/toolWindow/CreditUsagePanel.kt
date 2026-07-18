@@ -305,12 +305,18 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         gitStatusLabel.text = MyBundle["status.gitPushing"]
 
         ApplicationManager.getApplication().executeOnPooledThread {
-            val result = gitService.commitAndPush()
+            val result = gitService.commitAndPush(
+                onStatusUpdate = { message ->
+                    ApplicationManager.getApplication().invokeLater {
+                        gitStatusLabel.text = message
+                    }
+                },
+            )
             ApplicationManager.getApplication().invokeLater {
-                gitStatusLabel.text = if (result.success) {
-                    MyBundle["status.gitPushSuccess"]
-                } else {
-                    MyBundle["status.gitPushFailure", result.output]
+                gitStatusLabel.text = when {
+                    result.success -> MyBundle["status.gitPushSuccess"]
+                    result.conflict -> MyBundle["status.gitPushConflict", result.output]
+                    else -> MyBundle["status.gitPushFailure", result.output]
                 }
                 commitPushButton.isEnabled = true
             }

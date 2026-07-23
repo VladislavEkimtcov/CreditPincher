@@ -4,6 +4,7 @@ import com.github.vladislavekimtcov.creditpincher.model.CreditUsageEntry
 import com.github.vladislavekimtcov.creditpincher.toolWindow.UsageBarChart
 import com.github.vladislavekimtcov.creditpincher.services.CreditStatsCalculator
 import com.github.vladislavekimtcov.creditpincher.services.CreditUsageStorage
+import com.github.vladislavekimtcov.creditpincher.services.UsageLogMerger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -110,4 +111,50 @@ class MyPluginTest {
 
     private fun entry(timestamp: String, amount: Double): CreditUsageEntry =
         CreditUsageEntry(Instant.parse(timestamp), amount)
+
+    @Test
+    fun mergesUsageLogsChronologicallyAndDeduplicates() {
+        val ours = """
+            timestamp,amount
+            2026-07-01T09:00:00Z,12.0
+            2026-07-03T09:00:00Z,5.0
+        """.trimIndent()
+
+        val theirs = """
+            timestamp,amount
+            2026-07-02T10:00:00Z,18.0
+            2026-07-03T09:00:00Z,5.0
+        """.trimIndent()
+
+        val merged = UsageLogMerger.merge(ours, theirs)
+        val lines = merged.trim().lines()
+
+        assertEquals("timestamp,amount", lines[0])
+        assertEquals(4, lines.size)
+        assertEquals("2026-07-01T09:00:00Z,12.0", lines[1])
+        assertEquals("2026-07-02T10:00:00Z,18.0", lines[2])
+        assertEquals("2026-07-03T09:00:00Z,5.0", lines[3])
+    }
+
+    @Test
+    fun mergesDisjointUsageLogsWithoutDuplication() {
+        val ours = "timestamp,amount\n2026-07-05T00:00:00Z,1.0\n"
+        val theirs = "timestamp,amount\n2026-07-04T00:00:00Z,2.0\n"
+
+        val merged = UsageLogMerger.merge(ours, theirs)
+        val entries = UsageLogMerger.parseEntries(merged)
+
+        assertEquals(2, entries.size)
+        assertEquals(Instant.parse("2026-07-04T00:00:00Z"), entries[0].timestamp)
+        assertEquals(Instant.parse("2026-07-05T00:00:00Z"), entries[1].timestamp)
+    }
+
+    @Test
+    fun mergeHandlesEmptyOrBlankInputsGracefully() {
+        val merged = UsageLogMerger.merge("", "timestamp,amount\n2026-07-01T00:00:00Z,3.0\n")
+        val entries = UsageLogMerger.parseEntries(merged)
+
+        assertEquals(1, entries.size)
+        assertEquals(3.0, entries[0].amount, 0.0001)
+    }
 }

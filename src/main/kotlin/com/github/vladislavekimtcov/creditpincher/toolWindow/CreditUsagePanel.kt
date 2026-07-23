@@ -6,6 +6,7 @@ import com.github.vladislavekimtcov.creditpincher.model.UsageStats
 import com.github.vladislavekimtcov.creditpincher.services.CreditStatsCalculator
 import com.github.vladislavekimtcov.creditpincher.services.CreditUsageStore
 import com.github.vladislavekimtcov.creditpincher.services.GitBackupService
+import com.github.vladislavekimtcov.creditpincher.services.SwingGitConflictResolver
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.components.JBLabel
@@ -68,7 +69,7 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
     private val recentEntriesArea = JBTextArea()
     private val usageBarChart = UsageBarChart()
 
-    private val gitService by lazy { GitBackupService(store.storageDirectory()) }
+    private val gitService by lazy { GitBackupService(store.storageDirectory(), SwingGitConflictResolver(project)) }
     private val remoteUrlField = JBTextField()
     private val connectGitButton = JButton()
     private val commitPushButton = JButton()

@@ -42,10 +42,16 @@ jobs:
         run: ./gradlew buildPlugin
 
       # Create a new GitHub Release and upload the built zip artifact
+      #
+      # The commit message is passed through the environment rather than
+      # interpolated into the script: a message containing quotes, backticks or
+      # newlines would otherwise be re-parsed by the shell and split into extra
+      # positional arguments, which makes `gh release create` fail.
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES: ${{ github.event.head_commit.message }}
         run: |
-          gh release create v1.0.${{ github.run_number }} ./build/distributions/* \
+          gh release create "v1.0.${{ github.run_number }}" ./build/distributions/* \
             --title "Release v1.0.${{ github.run_number }}" \
-            --notes "${{ github.event.head_commit.message || 'Automated release.' }}"
+            --notes "${RELEASE_NOTES:-Automated release.}"

@@ -35,6 +35,16 @@ The folder contains human-readable files for:
 
 Because the files live in your home directory, they are shared across JetBrains IDEs on the same machine and can be backed up by copying that folder elsewhere.
 
+## Git backup and conflict resolution
+
+The storage directory can be pushed to a git remote so usage is shared between machines. When a push diverges from the remote, CreditPincher first tries to reconcile automatically (merge, then rebase). If conflicts remain, it asks how to resolve each file:
+
+- `usage-log.csv` can be merged chronologically, deduplicating entries recorded on both machines
+- `monthly-budget.txt` offers the local and remote values side by side
+- any file can be opened in the IDE's own three-way merge window - local changes on the left, incoming remote changes on the right, and an editable result pane in the middle
+
+Cancelling the merge window aborts the in-progress merge or rebase, so the storage directory is never left half-resolved.
+
 ## Development
 
 Run the IDE sandbox:

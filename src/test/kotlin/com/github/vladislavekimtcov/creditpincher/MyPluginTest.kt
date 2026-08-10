@@ -2,10 +2,13 @@ package com.github.vladislavekimtcov.creditpincher
 
 import com.github.vladislavekimtcov.creditpincher.model.CreditUsageEntry
 import com.github.vladislavekimtcov.creditpincher.toolWindow.UsageBarChart
+import com.github.vladislavekimtcov.creditpincher.services.ConflictMarkerParser
 import com.github.vladislavekimtcov.creditpincher.services.CreditStatsCalculator
 import com.github.vladislavekimtcov.creditpincher.services.CreditUsageStorage
+import com.github.vladislavekimtcov.creditpincher.services.GitConflictContentProvider
 import com.github.vladislavekimtcov.creditpincher.services.UsageLogMerger
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -156,5 +159,117 @@ class MyPluginTest {
 
         assertEquals(1, entries.size)
         assertEquals(3.0, entries[0].amount, 0.0001)
+    }
+
+    @Test
+    fun detectsConflictMarkers() {
+        val conflicted = "timestamp,amount\n<<<<<<< HEAD\nlocal\n=======\nremote\n>>>>>>> origin/main\n"
+
+        assertTrue(ConflictMarkerParser.hasConflictMarkers(conflicted))
+        assertFalse(ConflictMarkerParser.hasConflictMarkers("timestamp,amount\n2026-07-01T00:00:00Z,3.0\n"))
+        assertFalse(ConflictMarkerParser.hasConflictMarkers("a line that just says ======= in the middle"))
+    }
+
+    @Test
+    fun splitsConflictMarkersIntoBothSidesKeepingCommonLines() {
+        val conflicted = """
+            timestamp,amount
+            <<<<<<< HEAD
+            2026-07-03T09:00:00Z,5.0
+            =======
+            2026-07-04T09:00:00Z,6.0
+            >>>>>>> origin/main
+            2026-07-05T09:00:00Z,7.0
+        """.trimIndent()
+
+        val contents = ConflictMarkerParser.parse(conflicted)
+
+        assertEquals("timestamp,amount\n2026-07-03T09:00:00Z,5.0\n2026-07-05T09:00:00Z,7.0", contents.ours)
+        assertEquals("timestamp,amount\n2026-07-04T09:00:00Z,6.0\n2026-07-05T09:00:00Z,7.0", contents.theirs)
+        // Default (non-diff3) markers carry no ancestor text, only the common lines.
+        assertEquals("timestamp,amount\n2026-07-05T09:00:00Z,7.0", contents.base)
+    }
+
+    @Test
+    fun capturesAncestorSectionOfDiff3StyleConflictMarkers() {
+        val conflicted = """
+            <<<<<<< HEAD
+            local
+            ||||||| merged common ancestors
+            original
+            =======
+            remote
+            >>>>>>> origin/main
+        """.trimIndent()
+
+        val contents = ConflictMarkerParser.parse(conflicted)
+
+        assertEquals("local", contents.ours)
+        assertEquals("remote", contents.theirs)
+        assertEquals("original", contents.base)
+    }
+
+    @Test
+    fun conflictContentProviderPrefersIndexStagesOverWorkingTree() {
+        val tempDirectory = Files.createTempDirectory("credit-pincher-conflict-test")
+        try {
+            Files.writeString(tempDirectory.resolve("usage-log.csv"), "should be ignored")
+
+            val provider = StubConflictContentProvider(
+                workingDirectory = tempDirectory,
+                stages = mapOf(1 to "base text", 2 to "local text", 3 to "remote text"),
+            )
+
+            val contents = provider.contentsFor("usage-log.csv")
+
+            assertEquals("base text", contents.base)
+            assertEquals("local text", contents.ours)
+            assertEquals("remote text", contents.theirs)
+        } finally {
+            tempDirectory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun conflictContentProviderFallsBackToWorkingTreeMarkers() {
+        val tempDirectory = Files.createTempDirectory("credit-pincher-conflict-test")
+        try {
+            Files.writeString(
+                tempDirectory.resolve("usage-log.csv"),
+                "timestamp,amount\n<<<<<<< HEAD\nlocal\n=======\nremote\n>>>>>>> origin/main\n",
+            )
+
+            val provider = StubConflictContentProvider(workingDirectory = tempDirectory, stages = emptyMap())
+            val contents = provider.contentsFor("usage-log.csv")
+
+            assertEquals("timestamp,amount\nlocal\n", contents.ours)
+            assertEquals("timestamp,amount\nremote\n", contents.theirs)
+        } finally {
+            tempDirectory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun conflictContentProviderFallsBackToPlainWorkingCopyWithoutMarkers() {
+        val tempDirectory = Files.createTempDirectory("credit-pincher-conflict-test")
+        try {
+            Files.writeString(tempDirectory.resolve("monthly-budget.txt"), "310.0")
+
+            val provider = StubConflictContentProvider(workingDirectory = tempDirectory, stages = emptyMap())
+            val contents = provider.contentsFor("monthly-budget.txt")
+
+            assertEquals("310.0", contents.ours)
+            assertEquals("310.0", contents.theirs)
+        } finally {
+            tempDirectory.toFile().deleteRecursively()
+        }
+    }
+
+    /** Feeds canned index stages to [GitConflictContentProvider] so no repository is needed. */
+    private class StubConflictContentProvider(
+        workingDirectory: java.nio.file.Path,
+        private val stages: Map<Int, String>,
+    ) : GitConflictContentProvider(workingDirectory) {
+        override fun readStage(stage: Int, file: String): String = stages[stage] ?: ""
     }
 }

@@ -25,14 +25,14 @@ interface GitConflictResolver {
 }
 
 /**
- * Default resolver used until a dedicated conflict-resolution UI is built.
+ * Resolver used when no UI is available (headless usage, tests). It silently
+ * declines to resolve anything so the backup operation can safely abort the
+ * in-progress merge/rebase and report the conflict to the user instead of
+ * leaving the repository in a broken state.
  *
- * TODO: Replace this with a real UI (e.g. a modal dialog or tool window panel)
- * that lists [conflictedFiles], lets the user pick "keep local", "keep
- * remote", or open a diff/merge tool per file, and stages the results.
- * For now we silently decline to resolve anything so the backup operation
- * can safely abort the in-progress merge/rebase and report the conflict to
- * the user instead of leaving the repository in a broken state.
+ * [SwingGitConflictResolver] is the interactive implementation: it shows a
+ * per-file chooser and can hand any file off to the IDE's three-way merge
+ * window via [ThreeWayMergeWindow].
  */
 class NoOpGitConflictResolver : GitConflictResolver {
     override fun resolveConflicts(workingDirectory: Path, conflictedFiles: List<String>): Boolean = false

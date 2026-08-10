@@ -11,8 +11,7 @@ class SwingGitConflictResolver(private val project: Project) : GitConflictResolv
         ApplicationManager.getApplication().invokeAndWait {
             val dialog = GitConflictResolverDialog(project, workingDirectory, conflictedFiles)
             if (dialog.showAndGet()) {
-                dialog.applyResolutions()
-                resolved = true
+                resolved = dialog.applyResolutions()
             }
         }
         return resolved

@@ -21,6 +21,28 @@ class GitBackupService(
      */
     data class GitResult(val success: Boolean, val output: String, val conflict: Boolean = false)
 
+    /**
+     * Everything the UI needs to know about the storage directory, gathered in
+     * one pass so the panel only has to make a single background call.
+     *
+     * A storage directory that is already a repository with its own remote is
+     * the normal case for anyone who set it up by hand - it must be reported
+     * accurately rather than treated as "not connected yet", because
+     * re-initializing it would discard that existing setup.
+     */
+    data class RepositoryState(
+        val gitAvailable: Boolean,
+        val isRepository: Boolean,
+        val remoteUrl: String? = null,
+        val branch: String? = null,
+        val ahead: Int = 0,
+        val behind: Int = 0,
+        val hasUpstream: Boolean = false,
+        val hasUncommittedChanges: Boolean = false,
+    ) {
+        val hasRemote: Boolean get() = !remoteUrl.isNullOrBlank()
+    }
+
     /** Returns true if [workingDirectory] is already inside a git work tree. */
     fun isGitRepository(): Boolean {
         if (!isGitAvailable()) {
@@ -33,6 +55,76 @@ class GitBackupService(
 
     /** Returns true if the `git` executable can be located and invoked. */
     fun isGitAvailable(): Boolean = runGit(listOf("--version")).success
+
+    /** Collects a full [RepositoryState] snapshot of [workingDirectory]. */
+    fun inspect(): RepositoryState {
+        if (!isGitAvailable()) {
+            return RepositoryState(gitAvailable = false, isRepository = false)
+        }
+
+        val insideWorkTree = runGit(listOf("rev-parse", "--is-inside-work-tree"))
+        if (!insideWorkTree.success || insideWorkTree.output.trim() != "true") {
+            return RepositoryState(gitAvailable = true, isRepository = false)
+        }
+
+        val remoteUrl = runGit(listOf("remote", "get-url", "origin"))
+            .takeIf { it.success }?.output?.trim()?.ifEmpty { null }
+        val branch = runGit(listOf("rev-parse", "--abbrev-ref", "HEAD"))
+            .takeIf { it.success }?.output?.trim()?.ifEmpty { null }
+        val hasUncommittedChanges = runGit(listOf("status", "--porcelain")).output.isNotBlank()
+
+        // "<behind> <ahead>" relative to the tracked branch; absent when the
+        // branch has no upstream yet, in which case both stay at zero.
+        var ahead = 0
+        var behind = 0
+        val hasUpstream = hasUpstream()
+        if (hasUpstream) {
+            val counts = runGit(listOf("rev-list", "--left-right", "--count", "@{upstream}...HEAD"))
+            if (counts.success) {
+                val parts = counts.output.trim().split(Regex("\\s+"))
+                if (parts.size == 2) {
+                    behind = parts[0].toIntOrNull() ?: 0
+                    ahead = parts[1].toIntOrNull() ?: 0
+                }
+            }
+        }
+
+        return RepositoryState(
+            gitAvailable = true,
+            isRepository = true,
+            remoteUrl = remoteUrl,
+            branch = branch,
+            ahead = ahead,
+            behind = behind,
+            hasUpstream = hasUpstream,
+            hasUncommittedChanges = hasUncommittedChanges,
+        )
+    }
+
+    /**
+     * Points `origin` at [remoteUrl] for a directory that is *already* a git
+     * repository, without re-initializing it or renaming its current branch.
+     *
+     * Use this instead of [connectToRemote] whenever [isGitRepository] is true:
+     * the caller's repository, branch and history are left untouched.
+     */
+    fun setRemote(remoteUrl: String): GitResult {
+        if (!isGitAvailable()) {
+            return GitResult(false, "git executable not found on PATH.")
+        }
+        if (!isGitRepository()) {
+            return GitResult(false, "$workingDirectory is not a git repository.")
+        }
+
+        val existing = runGit(listOf("remote", "get-url", "origin"))
+        val result = if (existing.success && existing.output.isNotBlank()) {
+            runGit(listOf("remote", "set-url", "origin", remoteUrl))
+        } else {
+            runGit(listOf("remote", "add", "origin", remoteUrl))
+        }
+
+        return GitResult(result.success, result.output.ifBlank { "origin set to $remoteUrl" })
+    }
 
     /**
      * Initializes a new git repository in [workingDirectory], wires it up to
@@ -108,7 +200,13 @@ class GitBackupService(
             }
         }
 
-        val pushArgs = if (initialPush) listOf("push", "-u", "origin", "main") else listOf("push")
+        // A hand-made repository may have a branch with no upstream yet; plain
+        // `git push` would fail on it, so establish the tracking branch instead.
+        val pushArgs = if (initialPush || !hasUpstream()) {
+            listOf("push", "-u", "origin", currentBranch())
+        } else {
+            listOf("push")
+        }
         var pushResult = runGit(pushArgs)
         outputs += pushResult.output
 
@@ -206,6 +304,17 @@ class GitBackupService(
             statusCode in UNMERGED_STATUS_CODES
         }
     }
+
+    /** Name of the checked-out branch, falling back to `main` on a detached HEAD. */
+    private fun currentBranch(): String {
+        val result = runGit(listOf("rev-parse", "--abbrev-ref", "HEAD"))
+        val branch = result.output.trim()
+        return if (result.success && branch.isNotEmpty() && branch != "HEAD") branch else "main"
+    }
+
+    /** Returns true if the current branch tracks an upstream branch. */
+    private fun hasUpstream(): Boolean =
+        runGit(listOf("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")).success
 
     /** Returns the list of file paths that currently have merge conflicts. */
     private fun conflictedFiles(): List<String> {

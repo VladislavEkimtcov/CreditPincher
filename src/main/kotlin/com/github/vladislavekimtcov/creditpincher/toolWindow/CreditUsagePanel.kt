@@ -8,6 +8,7 @@ import com.github.vladislavekimtcov.creditpincher.services.CreditUsageStore
 import com.github.vladislavekimtcov.creditpincher.services.GitBackupService
 import com.github.vladislavekimtcov.creditpincher.services.SwingGitConflictResolver
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
@@ -73,9 +74,14 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
     private val remoteUrlField = JBTextField()
     private val connectGitButton = JButton()
     private val commitPushButton = JButton()
+    private val refreshGitButton = JButton()
     private val gitStatusLabel = WrappingLabel(" ")
+    private val gitConnectHint = WrappingLabel(" ")
     private val gitConnectPanel = JPanel()
     private val gitBackupPanel = JPanel()
+
+    /** Latest known repository state; decides what the connect button does. */
+    private var gitState: GitBackupService.RepositoryState? = null
 
     init {
         border = JBUI.Borders.empty(8)
@@ -210,12 +216,17 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         commitPushButton.text = MyBundle["button.commitPushGit"]
         commitPushButton.addActionListener { commitAndPushGit() }
 
+        refreshGitButton.text = MyBundle["button.refreshGitStatus"]
+        refreshGitButton.addActionListener { refreshGitState() }
+
         val urlRow = JPanel(BorderLayout(JBUI.scale(8), 0)).apply {
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
             add(JBLabel(MyBundle["label.gitRemoteUrl"]), BorderLayout.WEST)
             add(remoteUrlField, BorderLayout.CENTER)
         }
+
+        gitConnectHint.text = MyBundle["hint.gitConnect"]
 
         gitConnectPanel.layout = BoxLayout(gitConnectPanel, BoxLayout.Y_AXIS)
         gitConnectPanel.isOpaque = false
@@ -224,7 +235,12 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         gitConnectPanel.add(Box.createVerticalStrut(JBUI.scale(4)))
         gitConnectPanel.add(connectGitButton.apply { alignmentX = Component.LEFT_ALIGNMENT })
         gitConnectPanel.add(Box.createVerticalStrut(JBUI.scale(4)))
-        gitConnectPanel.add(WrappingLabel(MyBundle["hint.gitConnect"]).apply { alignmentX = Component.LEFT_ALIGNMENT })
+        gitConnectPanel.add(gitConnectHint.apply { alignmentX = Component.LEFT_ALIGNMENT })
+
+        // Hidden until the first status check resolves, so the connect and
+        // backup flows are never shown at the same time.
+        gitConnectPanel.isVisible = false
+        gitBackupPanel.isVisible = false
 
         gitBackupPanel.layout = BoxLayout(gitBackupPanel, BoxLayout.Y_AXIS)
         gitBackupPanel.isOpaque = false
@@ -247,6 +263,8 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
                         isOpaque = false
                         add(gitStatusLabel.apply { alignmentX = Component.LEFT_ALIGNMENT })
                         add(Box.createVerticalStrut(JBUI.scale(4)))
+                        add(refreshGitButton.apply { alignmentX = Component.LEFT_ALIGNMENT })
+                        add(Box.createVerticalStrut(JBUI.scale(4)))
                         add(gitConnectPanel)
                         add(gitBackupPanel)
                     }, BorderLayout.CENTER)
@@ -258,23 +276,104 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         return container
     }
 
-    private fun refreshGitState() {
+    /**
+     * Re-reads the state of the storage repository in the background.
+     *
+     * [statusOverride], when given, replaces the derived status text once the
+     * refresh finishes, so the outcome of a preceding action stays on screen.
+     */
+    private fun refreshGitState(statusOverride: String? = null) {
         connectGitButton.isEnabled = false
         commitPushButton.isEnabled = false
+        refreshGitButton.isEnabled = false
         gitStatusLabel.text = MyBundle["status.gitChecking"]
 
         ApplicationManager.getApplication().executeOnPooledThread {
-            val isRepo = gitService.isGitRepository()
-            ApplicationManager.getApplication().invokeLater {
-                gitConnectPanel.isVisible = !isRepo
-                gitBackupPanel.isVisible = isRepo
-                gitStatusLabel.text = if (isRepo) MyBundle["status.gitConnected"] else MyBundle["status.gitNotConnected"]
-                connectGitButton.isEnabled = true
-                commitPushButton.isEnabled = true
+            val inspection = runCatching { gitService.inspect() }
+            postToUi {
+                inspection.fold(
+                    onSuccess = { state ->
+                        applyGitState(state)
+                        if (statusOverride != null) {
+                            gitStatusLabel.text = statusOverride
+                        }
+                    },
+                    onFailure = { error ->
+                        // Never leave the panel stranded on "Checking…" - a failed
+                        // probe still has to hand control back to the user.
+                        gitState = null
+                        gitConnectPanel.isVisible = false
+                        gitBackupPanel.isVisible = false
+                        gitStatusLabel.text =
+                            MyBundle["status.gitCheckFailed", error.message ?: error.toString()]
+                    },
+                )
+                refreshGitButton.isEnabled = true
                 revalidate()
                 repaint()
             }
         }
+    }
+
+    /** Maps a [GitBackupService.RepositoryState] onto the git backup controls. */
+    private fun applyGitState(state: GitBackupService.RepositoryState) {
+        gitState = state
+
+        if (!state.gitAvailable) {
+            gitConnectPanel.isVisible = false
+            gitBackupPanel.isVisible = false
+            gitStatusLabel.text = MyBundle["status.gitUnavailable"]
+            return
+        }
+
+        // The URL row stays available in both states: for a fresh directory it
+        // drives the initial connect, and for a repository that already manages
+        // its own remote it shows - and can retarget - that remote.
+        gitConnectPanel.isVisible = true
+        connectGitButton.isEnabled = true
+        gitBackupPanel.isVisible = state.isRepository && state.hasRemote
+        commitPushButton.isEnabled = state.isRepository && state.hasRemote
+
+        if (!state.isRepository) {
+            connectGitButton.text = MyBundle["button.connectGit"]
+            gitConnectHint.text = MyBundle["hint.gitConnect"]
+            gitStatusLabel.text = MyBundle["status.gitNotConnected"]
+            return
+        }
+
+        connectGitButton.text = MyBundle["button.saveGitRemote"]
+        gitConnectHint.text = MyBundle["hint.gitSetRemote"]
+        if (state.hasRemote && remoteUrlField.text.isBlank()) {
+            remoteUrlField.text = state.remoteUrl
+        }
+        gitStatusLabel.text = describeRepository(state)
+    }
+
+    /** Human readable summary of an existing repository's backup state. */
+    private fun describeRepository(state: GitBackupService.RepositoryState): String {
+        if (!state.hasRemote) {
+            return MyBundle["status.gitRepoNoRemote"]
+        }
+
+        val lines = mutableListOf(
+            MyBundle["status.gitRepoConnected", state.remoteUrl.orEmpty(), state.branch.orEmpty()],
+        )
+
+        lines += when {
+            !state.hasUpstream -> MyBundle["status.gitNoUpstream"]
+            state.ahead > 0 && state.behind > 0 ->
+                MyBundle["status.gitDiverged", state.ahead.toString(), state.behind.toString()]
+
+            state.ahead > 0 -> MyBundle["status.gitAhead", state.ahead.toString()]
+            state.behind > 0 -> MyBundle["status.gitBehind", state.behind.toString()]
+            else -> MyBundle["status.gitInSync"]
+        }
+
+        if (state.hasUncommittedChanges) {
+            lines += MyBundle["status.gitUncommitted"]
+        }
+
+        return lines.joinToString(" ")
     }
 
     private fun connectGitRepository() {
@@ -284,19 +383,32 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
             return
         }
 
+        // An existing repository only needs its remote retargeted; re-running the
+        // full connect would re-init it, force the branch to main and silently
+        // replace whatever origin the user had already configured.
+        val alreadyRepository = gitState?.isRepository == true
+
         connectGitButton.isEnabled = false
-        gitStatusLabel.text = MyBundle["status.gitConnecting"]
+        gitStatusLabel.text = if (alreadyRepository) {
+            MyBundle["status.gitSavingRemote"]
+        } else {
+            MyBundle["status.gitConnecting"]
+        }
 
         ApplicationManager.getApplication().executeOnPooledThread {
-            val result = gitService.connectToRemote(url)
-            ApplicationManager.getApplication().invokeLater {
-                gitStatusLabel.text = if (result.success) {
-                    MyBundle["status.gitConnectSuccess"]
-                } else {
-                    MyBundle["status.gitConnectFailure", result.output]
+            val result = if (alreadyRepository) {
+                gitService.setRemote(url)
+            } else {
+                gitService.connectToRemote(url)
+            }
+            postToUi {
+                val message = when {
+                    result.success && alreadyRepository -> MyBundle["status.gitRemoteSaved"]
+                    result.success -> MyBundle["status.gitConnectSuccess"]
+                    alreadyRepository -> MyBundle["status.gitRemoteSaveFailure", result.output]
+                    else -> MyBundle["status.gitConnectFailure", result.output]
                 }
-                connectGitButton.isEnabled = true
-                refreshGitState()
+                refreshGitState(statusOverride = message)
             }
         }
     }
@@ -307,21 +419,28 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
 
         ApplicationManager.getApplication().executeOnPooledThread {
             val result = gitService.commitAndPush(
-                onStatusUpdate = { message ->
-                    ApplicationManager.getApplication().invokeLater {
-                        gitStatusLabel.text = message
-                    }
-                },
+                onStatusUpdate = { message -> postToUi { gitStatusLabel.text = message } },
             )
-            ApplicationManager.getApplication().invokeLater {
-                gitStatusLabel.text = when {
+            postToUi {
+                val message = when {
                     result.success -> MyBundle["status.gitPushSuccess"]
                     result.conflict -> MyBundle["status.gitPushConflict", result.output]
                     else -> MyBundle["status.gitPushFailure", result.output]
                 }
-                commitPushButton.isEnabled = true
+                refreshGitState(statusOverride = message)
             }
         }
+    }
+
+    /**
+     * Runs [action] on the EDT with [ModalityState.any].
+     *
+     * The default modality of a background `invokeLater` is non-modal, which
+     * holds the update back for as long as any modal dialog is open - long
+     * enough to leave the panel looking permanently stuck.
+     */
+    private fun postToUi(action: () -> Unit) {
+        ApplicationManager.getApplication().invokeLater(action, ModalityState.any())
     }
 
     private fun createBarChartSection(): JComponent {

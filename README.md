@@ -37,7 +37,11 @@ Because the files live in your home directory, they are shared across JetBrains 
 
 ## Git backup and conflict resolution
 
-The storage directory can be pushed to a git remote so usage is shared between machines. When a push diverges from the remote, CreditPincher first tries to reconcile automatically (merge, then rebase). If conflicts remain, it asks how to resolve each file:
+The storage directory can be pushed to a git remote so usage is shared between machines.
+
+If you have already made `~/.creditpincher` a git repository yourself, CreditPincher uses it as-is: the tool window reports the detected `origin`, the checked-out branch, how many commits are waiting to be pushed or pulled, and whether the tree is dirty. Editing the remote URL there only retargets `origin` — your repository, branch and history are left alone. The initialize-and-push flow is offered only when the directory is not a repository yet.
+
+When a push diverges from the remote, CreditPincher first tries to reconcile automatically (merge, then rebase). If conflicts remain, it asks how to resolve each file:
 
 - `usage-log.csv` can be merged chronologically, deduplicating entries recorded on both machines
 - `monthly-budget.txt` offers the local and remote values side by side

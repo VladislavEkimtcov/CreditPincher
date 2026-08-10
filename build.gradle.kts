@@ -16,5 +16,11 @@ dependencies {
     }
 }
 
-val buildNumber = System.getenv("GITHUB_RUN_NUMBER") ?: "LOCAL"
-version = "1.0.$buildNumber"
+// CI names its artifacts after the workflow run number so they line up with the
+// v1.0.<run> tags the release workflow creates. Locally the version comes from
+// gradle.properties, which build-plugin-macos.sh / build-plugin-windows.ps1
+// increment on every run - overriding it here would make those scripts look for
+// an archive that was never produced.
+providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.let { runNumber ->
+    version = "1.0.$runNumber"
+}

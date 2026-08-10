@@ -1,15 +1,19 @@
 <#
 .SYNOPSIS
-Increments the patch/build component of gradle.properties' version, then
-creates the IntelliJ plugin ZIP under build/distributions/ and archives it.
+Increments the patch/build component of gradle.properties' version, builds the
+IntelliJ plugin ZIP under build/distributions/, archives a copy under releases/
+and commits both. If anything fails the version bump is rolled back, so a failed
+run does not leave gradle.properties pointing at a version that was never built.
 #>
 
 $ErrorActionPreference = "Stop"
 
-# cd "$(dirname "$0")"
 Set-Location -Path $PSScriptRoot
 
+$pluginName = "CreditPincher"
 $propertiesFile = "gradle.properties"
+$distributionDirectory = "build/distributions"
+$releasesDir = "releases"
 
 if (-not (Test-Path -Path $propertiesFile)) {
     Write-Error "Cannot find $propertiesFile"
@@ -17,8 +21,10 @@ if (-not (Test-Path -Path $propertiesFile)) {
 }
 
 # Parse and increment the version safely
-$lines = Get-Content -Path $propertiesFile
+$originalLines = Get-Content -Path $propertiesFile
+$lines = $originalLines.Clone()
 $updated = $false
+$currentVersion = ""
 $nextVersion = ""
 
 for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -49,49 +55,61 @@ if (-not $updated) {
 # Write the updated version back to gradle.properties
 $lines | Set-Content -Path $propertiesFile
 
-$distributionDirectory = "build/distributions"
-if (Test-Path -Path $distributionDirectory) {
-    Get-ChildItem -Path $distributionDirectory -Filter "*.zip" -File | Remove-Item -Force
-}
+$releaseCommitted = $false
 
-Write-Host "Building CreditPincher version $nextVersion..."
+try {
+    if (Test-Path -Path $distributionDirectory) {
+        Get-ChildItem -Path $distributionDirectory -Filter "*.zip" -File | Remove-Item -Force
+    }
 
-# Run gradlew natively (checking for .bat on Windows vs .sh/Unix)
-$gradlew = if (Test-Path ".\gradlew.bat") { ".\gradlew.bat" } else { ".\gradlew" }
-& $gradlew buildPlugin
+    Write-Host "Building $pluginName version $nextVersion..."
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Gradle build failed."
-    exit $LASTEXITCODE
-}
+    # Run gradlew natively (checking for .bat on Windows vs .sh/Unix)
+    $gradlew = if (Test-Path ".\gradlew.bat") { ".\gradlew.bat" } else { ".\gradlew" }
+    & $gradlew buildPlugin
 
-$builtZip = Join-Path -Path $distributionDirectory -ChildPath "CreditPincher-$nextVersion.zip"
-Write-Host "Plugin built: $builtZip"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Gradle build failed."
+    }
 
-$releasesDir = "releases"
+    $builtZip = Join-Path -Path $distributionDirectory -ChildPath "$pluginName-$nextVersion.zip"
 
-if (-not (Test-Path -Path $builtZip -PathType Leaf)) {
-    Write-Error "Error: Expected plugin archive not found at $builtZip"
-    exit 1
-}
+    if (-not (Test-Path -Path $builtZip -PathType Leaf)) {
+        Write-Host "Archives actually produced:"
+        Get-ChildItem -Path $distributionDirectory -Filter "*.zip" -File -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "  $($_.FullName)" }
+        Write-Error "Expected plugin archive not found at $builtZip"
+    }
 
-if (-not (Test-Path -Path $releasesDir)) {
-    New-Item -ItemType Directory -Path $releasesDir -Force | Out-Null
-}
+    Write-Host "Plugin built: $builtZip"
 
-Copy-Item -Path $builtZip -Destination $releasesDir -Force
-Write-Host "Successfully archived to $releasesDir\"
+    if (-not (Test-Path -Path $releasesDir)) {
+        New-Item -ItemType Directory -Path $releasesDir -Force | Out-Null
+    }
 
-$releaseZip = Join-Path -Path $releasesDir -ChildPath "CreditPincher-$nextVersion.zip"
+    Copy-Item -Path $builtZip -Destination $releasesDir -Force
+    Write-Host "Archived to $releasesDir\$pluginName-$nextVersion.zip"
 
-git add $propertiesFile $releaseZip
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Error: Failed to stage files for commit"
-    exit 1
-}
+    $releaseZip = Join-Path -Path $releasesDir -ChildPath "$pluginName-$nextVersion.zip"
 
-git commit -m "Release version $nextVersion"
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Error: Failed to commit release"
-    exit 1
+    git add $propertiesFile $releaseZip
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to stage files for commit"
+    }
+
+    git commit -m "Release version $nextVersion"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to commit release"
+    }
+
+    $releaseCommitted = $true
+
+    Write-Host "Committed release $nextVersion."
+    Write-Host "Note: pushing this commit triggers the Release workflow, which publishes"
+    Write-Host "its own v1.0.<run number> tag independently of this version."
+} finally {
+    if (-not $releaseCommitted) {
+        $originalLines | Set-Content -Path $propertiesFile
+        Write-Host "Rolled $propertiesFile back to version $currentVersion."
+    }
 }

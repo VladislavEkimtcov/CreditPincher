@@ -2,7 +2,9 @@ package com.github.vladislavekimtcov.creditpincher.startup
 
 import com.github.vladislavekimtcov.creditpincher.MyBundle
 import com.github.vladislavekimtcov.creditpincher.services.CreditUsageStore
+import com.github.vladislavekimtcov.creditpincher.services.GitAutoSyncService
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
@@ -13,5 +15,7 @@ class MyProjectActivity : ProjectActivity {
         val store = ApplicationManager.getApplication().getService(CreditUsageStore::class.java)
         store.initialize()
         thisLogger().info(MyBundle["startup.storageReady", store.storageDirectory()])
+
+        service<GitAutoSyncService>().ensureScheduled()
     }
 }

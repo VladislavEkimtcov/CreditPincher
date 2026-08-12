@@ -230,6 +230,42 @@ class GitBackupService(
     }
 
     /**
+     * Fetches from `origin`, reconciles with it if the remote has moved ahead
+     * (the same merge-then-rebase strategy [commitAndPush] uses reactively on
+     * a rejected push), then stages, commits and pushes local changes.
+     *
+     * Unlike [commitAndPush], this proactively pulls in remote-only commits
+     * even when there is nothing local to push - the behaviour an unattended
+     * periodic sync needs, since nothing would otherwise trigger a pull on a
+     * machine that has not touched its own copy of the storage directory.
+     */
+    fun sync(onStatusUpdate: (String) -> Unit = {}): GitResult {
+        val fetchResult = runGit(listOf("fetch"))
+        if (!fetchResult.success) {
+            return GitResult(false, fetchResult.output)
+        }
+
+        if (hasUpstream() && behindUpstreamCount() > 0) {
+            val reconciliation = reconcileWithRemote(onStatusUpdate)
+            if (!reconciliation.success) {
+                return reconciliation
+            }
+        }
+
+        return commitAndPush(onStatusUpdate = onStatusUpdate)
+    }
+
+    /** Number of commits present on `@{upstream}` but not yet on HEAD. */
+    private fun behindUpstreamCount(): Int {
+        val counts = runGit(listOf("rev-list", "--left-right", "--count", "@{upstream}...HEAD"))
+        if (!counts.success) {
+            return 0
+        }
+        val parts = counts.output.trim().split(Regex("\\s+"))
+        return if (parts.size == 2) parts[0].toIntOrNull() ?: 0 else 0
+    }
+
+    /**
      * Attempts to bring the local branch up to date with its remote
      * counterpart without any user interaction. Tries a plain merge first
      * (`git pull --no-rebase --no-edit`), then falls back to a rebase

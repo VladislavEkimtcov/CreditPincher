@@ -3,13 +3,17 @@ package com.github.vladislavekimtcov.creditpincher.toolWindow
 import com.github.vladislavekimtcov.creditpincher.MyBundle
 import com.github.vladislavekimtcov.creditpincher.model.CreditUsageEntry
 import com.github.vladislavekimtcov.creditpincher.model.UsageStats
+import com.github.vladislavekimtcov.creditpincher.services.CreditPincherSettings
 import com.github.vladislavekimtcov.creditpincher.services.CreditStatsCalculator
 import com.github.vladislavekimtcov.creditpincher.services.CreditUsageStore
+import com.github.vladislavekimtcov.creditpincher.services.GitAutoSyncService
 import com.github.vladislavekimtcov.creditpincher.services.GitBackupService
 import com.github.vladislavekimtcov.creditpincher.services.SwingGitConflictResolver
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
+import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
@@ -37,6 +41,8 @@ import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.JSpinner
+import javax.swing.SpinnerNumberModel
 import javax.swing.border.TitledBorder
 
 class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
@@ -79,6 +85,22 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
     private val gitConnectHint = WrappingLabel(" ")
     private val gitConnectPanel = JPanel()
     private val gitBackupPanel = JPanel()
+
+    private val settings = service<CreditPincherSettings>()
+    private val autoSyncService = service<GitAutoSyncService>()
+    private val autoSyncCheckBox = JBCheckBox()
+    private val autoSyncIntervalSpinner = JSpinner(
+        SpinnerNumberModel(
+            CreditPincherSettings.DEFAULT_INTERVAL_MINUTES,
+            CreditPincherSettings.MIN_INTERVAL_MINUTES,
+            CreditPincherSettings.MAX_INTERVAL_MINUTES,
+            5,
+        ),
+    )
+    private val autoSyncStatusLabel = WrappingLabel(" ")
+
+    /** True while programmatically syncing the auto-sync controls to settings, to avoid re-triggering their listeners. */
+    private var isUpdatingAutoSyncControls = false
 
     /** Latest known repository state; decides what the connect button does. */
     private var gitState: GitBackupService.RepositoryState? = null
@@ -242,12 +264,44 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         gitConnectPanel.isVisible = false
         gitBackupPanel.isVisible = false
 
+        autoSyncCheckBox.text = MyBundle["label.autoSync"]
+        autoSyncCheckBox.addActionListener {
+            if (isUpdatingAutoSyncControls) return@addActionListener
+            settings.autoSyncEnabled = autoSyncCheckBox.isSelected
+            autoSyncIntervalSpinner.isEnabled = autoSyncCheckBox.isSelected
+            autoSyncService.reschedule()
+        }
+
+        autoSyncIntervalSpinner.addChangeListener {
+            if (isUpdatingAutoSyncControls) return@addChangeListener
+            settings.autoSyncIntervalMinutes = autoSyncIntervalSpinner.value as Int
+            autoSyncService.reschedule()
+        }
+
+        val autoSyncRow = JPanel().apply {
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            add(autoSyncCheckBox)
+            add(autoSyncIntervalSpinner.apply { maximumSize = Dimension(JBUI.scale(70), preferredSize.height) })
+            add(Box.createHorizontalStrut(JBUI.scale(4)))
+            add(JBLabel(MyBundle["label.autoSyncMinutes"]))
+        }
+
         gitBackupPanel.layout = BoxLayout(gitBackupPanel, BoxLayout.Y_AXIS)
         gitBackupPanel.isOpaque = false
         gitBackupPanel.alignmentX = Component.LEFT_ALIGNMENT
         gitBackupPanel.add(commitPushButton.apply { alignmentX = Component.LEFT_ALIGNMENT })
         gitBackupPanel.add(Box.createVerticalStrut(JBUI.scale(4)))
         gitBackupPanel.add(WrappingLabel(MyBundle["hint.gitBackup"]).apply { alignmentX = Component.LEFT_ALIGNMENT })
+        gitBackupPanel.add(Box.createVerticalStrut(JBUI.scale(8)))
+        gitBackupPanel.add(autoSyncRow)
+        gitBackupPanel.add(Box.createVerticalStrut(JBUI.scale(4)))
+        gitBackupPanel.add(WrappingLabel(MyBundle["hint.autoSync"]).apply { alignmentX = Component.LEFT_ALIGNMENT })
+        gitBackupPanel.add(Box.createVerticalStrut(JBUI.scale(4)))
+        gitBackupPanel.add(autoSyncStatusLabel.apply { alignmentX = Component.LEFT_ALIGNMENT })
+
+        syncAutoSyncControlsToSettings()
 
         val container = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -347,6 +401,32 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
             remoteUrlField.text = state.remoteUrl
         }
         gitStatusLabel.text = describeRepository(state)
+
+        if (gitBackupPanel.isVisible) {
+            syncAutoSyncControlsToSettings()
+        }
+    }
+
+    /** Re-reads the persisted auto-sync preference and last-run status into the panel's controls. */
+    private fun syncAutoSyncControlsToSettings() {
+        isUpdatingAutoSyncControls = true
+        try {
+            autoSyncCheckBox.isSelected = settings.autoSyncEnabled
+            autoSyncIntervalSpinner.value = settings.autoSyncIntervalMinutes
+            autoSyncIntervalSpinner.isEnabled = settings.autoSyncEnabled
+        } finally {
+            isUpdatingAutoSyncControls = false
+        }
+
+        val lastSyncTime = autoSyncService.lastSyncTime
+        autoSyncStatusLabel.text = if (lastSyncTime == null) {
+            MyBundle["status.autoSyncNever"]
+        } else {
+            MyBundle["status.autoSyncLast",
+                dateTimeFormat.format(lastSyncTime.atZone(zoneId)),
+                autoSyncService.lastSyncSummary.orEmpty(),
+            ]
+        }
     }
 
     /** Human readable summary of an existing repository's backup state. */
@@ -418,11 +498,16 @@ class CreditUsagePanel(project: Project) : JPanel(BorderLayout()) {
         gitStatusLabel.text = MyBundle["status.gitPushing"]
 
         ApplicationManager.getApplication().executeOnPooledThread {
-            val result = gitService.commitAndPush(
-                onStatusUpdate = { message -> postToUi { gitStatusLabel.text = message } },
-            )
+            // Shares the auto-sync service's lock so this never runs git
+            // concurrently with a scheduled background sync of the same directory.
+            val result = autoSyncService.tryRunExclusively {
+                gitService.commitAndPush(
+                    onStatusUpdate = { message -> postToUi { gitStatusLabel.text = message } },
+                )
+            }
             postToUi {
                 val message = when {
+                    result == null -> MyBundle["status.gitAutoSyncInProgress"]
                     result.success -> MyBundle["status.gitPushSuccess"]
                     result.conflict -> MyBundle["status.gitPushConflict", result.output]
                     else -> MyBundle["status.gitPushFailure", result.output]
